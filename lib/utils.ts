@@ -8,12 +8,36 @@ export function cn(...inputs: ClassValue[]) {
 export function formatDate(dateString: string | undefined): string {
   if (!dateString) return '-'
   try {
+    // Handle DD/MM/YYYY format (French format)
+    if (dateString.includes('/')) {
+      const parts = dateString.split('/')
+      if (parts.length === 3) {
+        const day = parts[0]
+        const month = parts[1]
+        const year = parts[2]
+        // Validate the parts
+        if (day && month && year && !isNaN(parseInt(day)) && !isNaN(parseInt(month)) && !isNaN(parseInt(year))) {
+          const date = new Date(`${year}-${month}-${day}`)
+          if (!isNaN(date.getTime())) {
+            return date.toLocaleDateString('en-US', {
+              year: 'numeric',
+              month: 'short',
+              day: 'numeric',
+            })
+          }
+        }
+      }
+    }
+    // Try standard date parsing
     const date = new Date(dateString)
-    return date.toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-    })
+    if (!isNaN(date.getTime())) {
+      return date.toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+      })
+    }
+    return dateString
   } catch {
     return dateString
   }

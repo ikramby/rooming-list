@@ -7,7 +7,9 @@ import { exportReservationToPDF } from '@/lib/pdfExporter';
 import { ExcelImporter } from '@/components/ExcelImporter';
 import { ReservationFilters } from '@/components/ReservationFilters';
 import { ReservationsList } from '@/components/ReservationsList';
-import { Plane } from 'lucide-react';
+import { SummaryTable } from '@/components/SummaryTable';
+import { Plane, LayoutGrid, Table as TableIcon } from 'lucide-react';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
 
 export default function Home() {
@@ -93,10 +95,31 @@ export default function Home() {
 
                 {/* Results */}
                 <div className="lg:col-span-3">
-                  <ReservationsList
-                    reservations={filteredReservations}
-                    onExportPDF={handleExportPDF}
-                  />
+                  <Tabs defaultValue="list" className="w-full">
+                    <div className="flex items-center justify-between mb-4">
+                      <h2 className="text-2xl font-bold">Results ({filteredReservations.length})</h2>
+                      <TabsList>
+                        <TabsTrigger value="list" className="gap-2">
+                          <LayoutGrid className="h-4 w-4" />
+                          List
+                        </TabsTrigger>
+                        <TabsTrigger value="table" className="gap-2">
+                          <TableIcon className="h-4 w-4" />
+                          Table
+                        </TabsTrigger>
+                      </TabsList>
+                    </div>
+
+                    <TabsContent value="list" className="mt-0">
+                      <ReservationsList
+                        reservations={filteredReservations}
+                        onExportPDF={handleExportPDF}
+                      />
+                    </TabsContent>
+                    <TabsContent value="table" className="mt-0 print-container">
+                      <SummaryTable reservations={filteredReservations} />
+                    </TabsContent>
+                  </Tabs>
                 </div>
               </div>
             </section>
