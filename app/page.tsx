@@ -22,8 +22,8 @@ export default function Home() {
   const filteredReservations = filterReservations(
     reservations,
     filters.type,
-    filters.startDate,
-    filters.endDate,
+    filters.inDate,
+    filters.outDate,
     filters.searchTerm,
   );
 
@@ -129,3 +129,5 @@ export default function Home() {
     </main>
   );
 }
+
+

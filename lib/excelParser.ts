@@ -225,33 +225,66 @@ function extractAirline(text: string): string {
 export function filterReservations(
   reservations: Reservation[],
   type: 'all' | 'departure' | 'arrival',
-  startDate?: string,
-  endDate?: string,
+  inDate?: string,
+  outDate?: string,
   searchTerm?: string,
 ): Reservation[] {
   return reservations.filter((reservation) => {
+    // Filter by type - only 'departure' is used now
     if (type === 'departure') {
+      // For departure, we check the outbound flight departure date
       if (!reservation.outboundFlight?.departureDate) return false;
       const depDate = parseDate(reservation.outboundFlight.departureDate);
-      const start = startDate ? new Date(startDate) : new Date('1900-01-01');
-      const end = endDate ? new Date(endDate) : new Date('2100-12-31');
+      const start = inDate ? new Date(inDate) : new Date('1900-01-01');
+      const end = outDate ? new Date(outDate) : new Date('2100-12-31');
       if (isNaN(depDate.getTime()) || depDate < start || depDate > end) return false;
-    } else if (type === 'arrival') {
-      if (!reservation.returnFlight?.arrivalDate) return false;
-      const arrDate = parseDate(reservation.returnFlight.arrivalDate);
-      const start = startDate ? new Date(startDate) : new Date('1900-01-01');
-      const end = endDate ? new Date(endDate) : new Date('2100-12-31');
-      if (isNaN(arrDate.getTime()) || arrDate < start || arrDate > end) return false;
-    } else if (type === 'all' && (startDate || endDate)) {
-      const start = startDate ? new Date(startDate) : new Date('1900-01-01');
-      const end = endDate ? new Date(endDate) : new Date('2100-12-31');
-      const depDate = parseDate(reservation.outboundFlight?.departureDate || '');
-      const arrDate = parseDate(reservation.returnFlight?.arrivalDate || '');
-      const depValid = !isNaN(depDate.getTime()) && depDate >= start && depDate <= end;
-      const arrValid = !isNaN(arrDate.getTime()) && arrDate >= start && arrDate <= end;
-      if (!depValid && !arrValid) return false;
+    } else if (type === 'all') {
+      // For 'all', we check accommodations/transfers check-in and check-out dates
+      if (inDate || outDate) {
+        const start = inDate ? new Date(inDate) : new Date('1900-01-01');
+        const end = outDate ? new Date(outDate) : new Date('2100-12-31');
+        
+        let hasValidDate = false;
+        
+        // Check accommodations
+        if (reservation.accommodations.length > 0) {
+          for (const acc of reservation.accommodations) {
+            const checkInDate = parseDate(acc.checkInDate);
+            const checkOutDate = parseDate(acc.checkOutDate);
+            
+            if (!isNaN(checkInDate.getTime()) && checkInDate >= start && checkInDate <= end) {
+              hasValidDate = true;
+              break;
+            }
+            if (!isNaN(checkOutDate.getTime()) && checkOutDate >= start && checkOutDate <= end) {
+              hasValidDate = true;
+              break;
+            }
+          }
+        }
+        
+        // Check transfers if no accommodation found
+        if (!hasValidDate && reservation.transfers.length > 0) {
+          for (const transfer of reservation.transfers) {
+            const checkInDate = parseDate(transfer.checkInDate);
+            const checkOutDate = parseDate(transfer.checkOutDate);
+            
+            if (!isNaN(checkInDate.getTime()) && checkInDate >= start && checkInDate <= end) {
+              hasValidDate = true;
+              break;
+            }
+            if (!isNaN(checkOutDate.getTime()) && checkOutDate >= start && checkOutDate <= end) {
+              hasValidDate = true;
+              break;
+            }
+          }
+        }
+        
+        if (!hasValidDate) return false;
+      }
     }
 
+    // Filter by search term
     if (searchTerm) {
       const term = searchTerm.toLowerCase();
       const searchableText = [
@@ -272,9 +305,19 @@ export function filterReservations(
 
 function parseDate(dateStr: string): Date {
   if (!dateStr) return new Date('1900-01-01');
-  const parts = dateStr.split('/');
-  if (parts.length === 3) {
-    return new Date(`${parts[2]}-${parts[1]}-${parts[0]}`);
+  
+  // Handle DD/MM/YYYY format (French format)
+  if (dateStr.includes('/')) {
+    const parts = dateStr.split('/');
+    if (parts.length === 3) {
+      const day = parts[0];
+      const month = parts[1];
+      const year = parts[2];
+      if (day && month && year && !isNaN(parseInt(day)) && !isNaN(parseInt(month)) && !isNaN(parseInt(year))) {
+        return new Date(`${year}-${month}-${day}`);
+      }
+    }
   }
+  
   return new Date(dateStr);
 }

@@ -51,12 +51,11 @@ export interface Reservation {
 }
 
 export interface FilterOptions {
-  startDate?: string;
-  endDate?: string;
+  inDate?: string;      // Changed from startDate
+  outDate?: string;     // Changed from endDate
   type: 'all' | 'departure' | 'arrival';
   searchTerm?: string;
 }
-
 export interface ParsedData {
   reservations: Reservation[];
   parseDate: string;
