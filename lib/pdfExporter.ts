@@ -1,197 +1,532 @@
+// lib/pdfExporter.ts
+
 import { Reservation } from './types';
 import jsPDF from 'jspdf';
-import html2canvas from 'html2canvas';
 
-export async function exportReservationToPDF(reservation: Reservation) {
-  // Create a temporary HTML element
-  const html = createReservationHTML(reservation);
-  const element = document.createElement('div');
-  element.innerHTML = html;
-  element.style.position = 'fixed';
-  element.style.top = '-9999px';
-  element.style.left = '-9999px';
-  element.style.width = '210mm'; // A4 width
-  element.style.backgroundColor = 'white';
-  element.style.padding = '20px';
-  element.style.fontSize = '12px';
-  element.style.lineHeight = '1.5';
-  element.style.fontFamily = 'Arial, sans-serif';
-  element.style.zIndex = '-1';
-  document.body.appendChild(element);
-
+// Function to format date
+function formatDate(dateString: string | undefined): string {
+  if (!dateString) return 'N/A';
   try {
-    // Wait for images to load
-    await new Promise(resolve => setTimeout(resolve, 100));
-
-    const canvas = await html2canvas(element, {
-      scale: 2,
-      useCORS: true,
-      logging: false,
-      allowTaint: true,
-    });
-
-    const imgData = canvas.toDataURL('image/png');
-    const pdf = new jsPDF({
-      orientation: 'portrait',
-      unit: 'mm',
-      format: 'a4',
-    });
-
-    const imgWidth = 210; // A4 width in mm
-    const imgHeight = (canvas.height * imgWidth) / canvas.width;
-    let heightLeft = imgHeight;
-    let position = 0;
-
-    // Add pages as needed
-    pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
-    heightLeft -= 297; // A4 height in mm
-
-    while (heightLeft >= 0) {
-      position = heightLeft - imgHeight;
-      pdf.addPage();
-      pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
-      heightLeft -= 297;
+    if (dateString.includes('/')) {
+      const parts = dateString.split('/');
+      if (parts.length === 3) {
+        return `${parts[0]}/${parts[1]}/${parts[2]}`;
+      }
     }
-
-    pdf.save(`Reservation_${reservation.bookingReference}.pdf`);
-  } finally {
-    if (element.parentElement) {
-      document.body.removeChild(element);
+    const date = new Date(dateString);
+    if (!isNaN(date.getTime())) {
+      return date.toLocaleDateString('fr-FR');
     }
+    return dateString;
+  } catch {
+    return dateString;
   }
 }
 
-function createReservationHTML(reservation: Reservation): string {
-  const passengersHTML = reservation.passengers
-    .map(
-      (p) => `
-    <tr>
-      <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">${p.civility}</td>
-      <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">${p.lastName}</td>
-      <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">${p.firstName}</td>
-      <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">${p.age || '-'}</td>
-      <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">${p.dateOfBirth || '-'}</td>
-    </tr>
-  `,
-    )
-    .join('');
-
-  const flightHTML = (flight: any, title: string) => `
-    <div style="margin-bottom: 20px; padding: 15px; background-color: #f3f4f6; border-radius: 8px;">
-      <h3 style="margin: 0 0 12px 0; font-size: 14px; font-weight: bold;">${title}</h3>
-      <table style="width: 100%; font-size: 11px;">
-        <tr>
-          <td style="padding: 4px; font-weight: bold;">Departure:</td>
-          <td style="padding: 4px;">${flight.departureCity} (${flight.departureIATA}) - ${formatDateForPDF(flight.departureDate)} ${flight.departureTime}</td>
-        </tr>
-        <tr>
-          <td style="padding: 4px; font-weight: bold;">Arrival:</td>
-          <td style="padding: 4px;">${flight.arrivalCity} (${flight.arrivalIATA}) - ${formatDateForPDF(flight.arrivalDate)} ${flight.arrivalTime}</td>
-        </tr>
-        ${flight.flightNumber ? `<tr><td style="padding: 4px; font-weight: bold;">Flight:</td><td style="padding: 4px;">${flight.flightNumber}</td></tr>` : ''}
-        ${flight.airline ? `<tr><td style="padding: 4px; font-weight: bold;">Airline:</td><td style="padding: 4px;">${flight.airline}</td></tr>` : ''}
-      </table>
-    </div>
-  `;
-
-  const accommodationsHTML = reservation.accommodations
-    .map(
-      (acc) => `
-    <div style="margin-bottom: 10px; padding: 10px; background-color: #f9fafb; border-left: 3px solid #3b82f6;">
-      <p style="margin: 0; font-weight: bold;">${acc.name}</p>
-      <p style="margin: 4px 0 0 0; font-size: 11px; color: #666;">${acc.roomType}</p>
-      <p style="margin: 4px 0 0 0; font-size: 11px;">Check-in: ${formatDateForPDF(acc.checkInDate)} | Check-out: ${formatDateForPDF(acc.checkOutDate)}</p>
-    </div>
-  `,
-    )
-    .join('');
-
-  const transfersHTML = reservation.transfers
-    .map(
-      (trans) => `
-    <div style="margin-bottom: 10px; padding: 10px; background-color: #f9fafb; border-left: 3px solid #10b981;">
-      <p style="margin: 0; font-weight: bold;">${trans.description}</p>
-      <p style="margin: 4px 0 0 0; font-size: 11px;">From: ${formatDateForPDF(trans.checkInDate)} | To: ${formatDateForPDF(trans.checkOutDate)}</p>
-    </div>
-  `,
-    )
-    .join('');
-
-  return `
-    <div style="font-family: Arial, sans-serif; color: #1f2937;">
-      <div style="text-align: center; margin-bottom: 30px; border-bottom: 2px solid #3b82f6; padding-bottom: 20px;">
-        <h1 style="margin: 0 0 8px 0; font-size: 28px; color: #1e40af;">Travel Reservation</h1>
-        <p style="margin: 0; font-size: 12px; color: #666;">Booking Reference: <strong>${reservation.bookingReference}</strong></p>
-      </div>
-
-      <div style="margin-bottom: 20px;">
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
-          <div>
-            <p style="margin: 0; font-size: 11px; color: #666; font-weight: bold; text-transform: uppercase;">Hotel</p>
-            <p style="margin: 4px 0 0 0; font-size: 13px; font-weight: bold;">${reservation.hotelName}</p>
-          </div>
-          <div>
-            <p style="margin: 0; font-size: 11px; color: #666; font-weight: bold; text-transform: uppercase;">Agency</p>
-            <p style="margin: 4px 0 0 0; font-size: 13px;">${reservation.agency} ${reservation.agencyCode ? `[${reservation.agencyCode}]` : ''}</p>
-          </div>
-        </div>
-      </div>
-
-      <div style="margin-bottom: 25px;">
-        <h2 style="margin: 0 0 12px 0; font-size: 16px; border-bottom: 1px solid #e5e7eb; padding-bottom: 8px;">Passengers (${reservation.passengers.length})</h2>
-        <table style="width: 100%; border-collapse: collapse;">
-          <thead>
-            <tr style="background-color: #f3f4f6;">
-              <th style="padding: 8px; text-align: left; border-bottom: 2px solid #d1d5db; font-size: 11px; font-weight: bold;">Civility</th>
-              <th style="padding: 8px; text-align: left; border-bottom: 2px solid #d1d5db; font-size: 11px; font-weight: bold;">Last Name</th>
-              <th style="padding: 8px; text-align: left; border-bottom: 2px solid #d1d5db; font-size: 11px; font-weight: bold;">First Name</th>
-              <th style="padding: 8px; text-align: left; border-bottom: 2px solid #d1d5db; font-size: 11px; font-weight: bold;">Age</th>
-              <th style="padding: 8px; text-align: left; border-bottom: 2px solid #d1d5db; font-size: 11px; font-weight: bold;">DOB</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${passengersHTML}
-          </tbody>
-        </table>
-      </div>
-
-      <div style="margin-bottom: 25px;">
-        <h2 style="margin: 0 0 12px 0; font-size: 16px; border-bottom: 1px solid #e5e7eb; padding-bottom: 8px;">Flights</h2>
-        ${flightHTML(reservation.outboundFlight, 'Outbound Flight')}
-        ${flightHTML(reservation.returnFlight, 'Return Flight')}
-      </div>
-
-      ${reservation.accommodations.length > 0 ? `
-        <div style="margin-bottom: 25px;">
-          <h2 style="margin: 0 0 12px 0; font-size: 16px; border-bottom: 1px solid #e5e7eb; padding-bottom: 8px;">Accommodations</h2>
-          ${accommodationsHTML}
-        </div>
-      ` : ''}
-
-      ${reservation.transfers.length > 0 ? `
-        <div style="margin-bottom: 25px;">
-          <h2 style="margin: 0 0 12px 0; font-size: 16px; border-bottom: 1px solid #e5e7eb; padding-bottom: 8px;">Transfers</h2>
-          ${transfersHTML}
-        </div>
-      ` : ''}
-
-      <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #e5e7eb; font-size: 11px; color: #666; text-align: center;">
-        <p style="margin: 0;">Generated on: ${formatDateForPDF(new Date().toISOString())}</p>
-      </div>
-    </div>
-  `;
+// Function to format time
+function formatTime(timeString: string | undefined): string {
+  if (!timeString) return 'N/A';
+  return timeString;
 }
 
-function formatDateForPDF(dateString: string): string {
-  if (!dateString) return '';
+// Function to generate filename based on filter
+function generateFilename(reservations: Reservation[], type?: string, date?: string): string {
+  const today = new Date().toISOString().split('T')[0];
+  
+  if (reservations.length === 1) {
+    // Single reservation
+    if (type === 'departure' && date) {
+      return `reservation_depart_${date}_${reservations[0].bookingReference}.pdf`;
+    } else if (type === 'arrival' && date) {
+      return `reservation_arrivee_${date}_${reservations[0].bookingReference}.pdf`;
+    }
+    return `reservation_${reservations[0].bookingReference}.pdf`;
+  } else {
+    // Multiple reservations
+    if (type === 'departure' && date) {
+      return `reservations_depart_${date}_${reservations.length}_voyageurs.pdf`;
+    } else if (type === 'arrival' && date) {
+      return `reservations_arrivee_${date}_${reservations.length}_voyageurs.pdf`;
+    }
+    return `reservations_${today}_${reservations.length}_voyageurs.pdf`;
+  }
+}
+
+// Export single reservation to PDF
+export async function exportReservationToPDF(
+  reservation: Reservation, 
+  filterType?: string, 
+  filterDate?: string
+): Promise<void> {
   try {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
+    const doc = new jsPDF({
+      orientation: 'portrait',
+      unit: 'mm',
+      format: 'a4'
     });
-  } catch {
-    return dateString;
+
+    let yPosition = 25;
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const margin = 20;
+    const lineHeight = 8;
+
+    // Helper function to add a new page if needed
+    const checkNewPage = (currentY: number, neededSpace: number = 40) => {
+      if (currentY + neededSpace > doc.internal.pageSize.getHeight() - 25) {
+        doc.addPage();
+        return 25;
+      }
+      return currentY;
+    };
+
+    // Top decorative line
+    doc.setDrawColor(79, 70, 229);
+    doc.setLineWidth(1.5);
+    doc.line(margin, yPosition - 5, pageWidth - margin, yPosition - 5);
+    
+    // Title positioned lower (between the two lines)
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(22);
+    doc.setTextColor(79, 70, 229);
+    doc.text('TRAVEL RESERVATION DETAILS', pageWidth / 2, yPosition + 8, { align: 'center' });
+    yPosition += 20;
+    
+    doc.setFontSize(11);
+    doc.setTextColor(100, 100, 100);
+    doc.text(`Booking Reference: ${reservation.bookingReference}`, pageWidth / 2, yPosition, { align: 'center' });
+    yPosition += 12;
+    
+    // Add filter info if provided
+    if (filterType && filterDate) {
+      doc.setFontSize(10);
+      doc.setTextColor(79, 70, 229);
+      const filterText = filterType === 'departure' 
+        ? `Filtré par : Départ le ${formatDate(filterDate)}`
+        : `Filtré par : Arrivée le ${formatDate(filterDate)}`;
+      doc.text(filterText, pageWidth / 2, yPosition, { align: 'center' });
+      yPosition += 8;
+    }
+    
+    // Bottom decorative line
+    doc.line(margin, yPosition - 3, pageWidth - margin, yPosition - 3);
+    yPosition += 8;
+
+    // Booking Information Section
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(14);
+    doc.setTextColor(79, 70, 229);
+    doc.text('BOOKING INFORMATION', margin, yPosition);
+    yPosition += 8;
+    
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    doc.setTextColor(60, 60, 60);
+    
+    const bookingInfo = [
+      { label: 'Booking Reference', value: reservation.bookingReference },
+      { label: 'Booking Date', value: formatDate(reservation.bookingDate) },
+      { label: 'Hotel', value: reservation.hotelName || 'N/A' },
+      { label: 'Agency', value: `${reservation.agency || 'N/A'} (${reservation.agencyCode || 'N/A'})` },
+    ];
+    
+    for (const info of bookingInfo) {
+      yPosition = checkNewPage(yPosition);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(80, 80, 80);
+      doc.text(info.label + ':', margin, yPosition);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(60, 60, 60);
+      doc.text(info.value, margin + 45, yPosition);
+      yPosition += lineHeight;
+    }
+    yPosition += 5;
+
+    // Passengers Section
+    yPosition = checkNewPage(yPosition, 40 + (reservation.passengers.length * 20));
+    
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(14);
+    doc.setTextColor(79, 70, 229);
+    doc.text(`PASSENGERS (${reservation.passengers.length})`, margin, yPosition);
+    yPosition += 8;
+    
+    for (let i = 0; i < reservation.passengers.length; i++) {
+      const p = reservation.passengers[i];
+      yPosition = checkNewPage(yPosition, 25);
+      
+      // Light background for passengers
+      if (i % 2 === 0) {
+        doc.setFillColor(245, 245, 250);
+        doc.rect(margin, yPosition - 4, pageWidth - (margin * 2), 20, 'F');
+      }
+      
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.setTextColor(79, 70, 229);
+      doc.text(`${p.civility} ${p.firstName} ${p.lastName}`, margin + 3, yPosition);
+      yPosition += 6;
+      
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
+      doc.setTextColor(80, 80, 80);
+      if (p.age) {
+        doc.text(`Age: ${p.age}`, margin + 8, yPosition);
+        yPosition += 5;
+      }
+      if (p.dateOfBirth) {
+        doc.text(`Born: ${formatDate(p.dateOfBirth)}`, margin + 8, yPosition);
+        yPosition += 5;
+      }
+      yPosition += 6;
+    }
+    yPosition += 3;
+
+    // Outbound Flight Section
+    yPosition = checkNewPage(yPosition, 70);
+    
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(14);
+    doc.setTextColor(79, 70, 229);
+    doc.text('OUTBOUND FLIGHT', margin, yPosition);
+    yPosition += 8;
+    
+    // Flight card background
+    doc.setFillColor(250, 250, 255);
+    doc.rect(margin, yPosition - 3, pageWidth - (margin * 2), 55, 'F');
+    doc.setDrawColor(200, 200, 220);
+    doc.rect(margin, yPosition - 3, pageWidth - (margin * 2), 55);
+    
+    const outboundInfo = [
+      { label: 'From:', value: `${reservation.outboundFlight.departureCity || 'N/A'} (${reservation.outboundFlight.departureIATA || 'N/A'})` },
+      { label: 'Departure:', value: `${formatDate(reservation.outboundFlight.departureDate)} at ${formatTime(reservation.outboundFlight.departureTime)}` },
+      { label: 'To:', value: `${reservation.outboundFlight.arrivalCity || 'N/A'} (${reservation.outboundFlight.arrivalIATA || 'N/A'})` },
+      { label: 'Arrival:', value: `${formatDate(reservation.outboundFlight.arrivalDate)} at ${formatTime(reservation.outboundFlight.arrivalTime)}` },
+      { label: 'Flight Number:', value: reservation.outboundFlight.flightNumber || 'N/A' },
+      { label: 'Airline:', value: reservation.outboundFlight.airline || 'N/A' },
+    ];
+    
+    let outboundY = yPosition;
+    for (const info of outboundInfo) {
+      // Label and value on the same line
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.setTextColor(100, 100, 120);
+      doc.text(info.label, margin + 5, outboundY);
+      
+      // Value on the same line, just after the label
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(60, 60, 60);
+      doc.text(info.value, margin + 30, outboundY);
+      
+      outboundY += 8;
+    }
+    yPosition += 58;
+
+    // Return Flight Section
+    yPosition = checkNewPage(yPosition, 70);
+    
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(14);
+    doc.setTextColor(79, 70, 229);
+    doc.text('RETURN FLIGHT', margin, yPosition);
+    yPosition += 8;
+    
+    // Flight card background
+    doc.setFillColor(250, 250, 255);
+    doc.rect(margin, yPosition - 3, pageWidth - (margin * 2), 55, 'F');
+    doc.setDrawColor(200, 200, 220);
+    doc.rect(margin, yPosition - 3, pageWidth - (margin * 2), 55);
+    
+    const returnInfo = [
+      { label: 'From:', value: `${reservation.returnFlight.departureCity || 'N/A'} (${reservation.returnFlight.departureIATA || 'N/A'})` },
+      { label: 'Departure:', value: `${formatDate(reservation.returnFlight.departureDate)} at ${formatTime(reservation.returnFlight.departureTime)}` },
+      { label: 'To:', value: `${reservation.returnFlight.arrivalCity || 'N/A'} (${reservation.returnFlight.arrivalIATA || 'N/A'})` },
+      { label: 'Arrival:', value: `${formatDate(reservation.returnFlight.arrivalDate)} at ${formatTime(reservation.returnFlight.arrivalTime)}` },
+      { label: 'Flight Number:', value: reservation.returnFlight.flightNumber || 'N/A' },
+      { label: 'Airline:', value: reservation.returnFlight.airline || 'N/A' },
+    ];
+    
+    let returnY = yPosition;
+    for (const info of returnInfo) {
+      // Label and value on the same line
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.setTextColor(100, 100, 120);
+      doc.text(info.label, margin + 5, returnY);
+      
+      // Value on the same line, just after the label
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(60, 60, 60);
+      doc.text(info.value, margin + 30, returnY);
+      
+      returnY += 8;
+    }
+
+    // Footer
+    const pageCount = doc.internal.pages.length;
+    for (let i = 1; i <= pageCount; i++) {
+      doc.setPage(i);
+      doc.setFont('helvetica', 'italic');
+      doc.setFontSize(8);
+      doc.setTextColor(150, 150, 150);
+      doc.text(`Generated on ${new Date().toLocaleString()}`, pageWidth / 2, doc.internal.pageSize.getHeight() - 8, { align: 'center' });
+      doc.text('Travel Reservation Manager', pageWidth / 2, doc.internal.pageSize.getHeight() - 4, { align: 'center' });
+    }
+
+    // Save PDF with dynamic filename
+    const filename = generateFilename([reservation], filterType, filterDate);
+    doc.save(filename);
+    
+  } catch (error) {
+    console.error('PDF export error:', error);
+    throw error;
+  }
+}
+
+// Export multiple reservations to a SINGLE PDF file
+export async function exportMultipleReservationsToPDF(
+  reservations: Reservation[], 
+  filterType?: string, 
+  filterDate?: string
+): Promise<void> {
+  if (reservations.length === 0) {
+    throw new Error('No reservations to export');
+  }
+
+  try {
+    const doc = new jsPDF({
+      orientation: 'portrait',
+      unit: 'mm',
+      format: 'a4'
+    });
+
+    let yPosition = 25;
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const margin = 20;
+    const lineHeight = 8;
+    let isFirstPage = true;
+
+    // Helper function to add a new page if needed
+    const checkNewPage = (currentY: number, neededSpace: number = 40) => {
+      if (currentY + neededSpace > doc.internal.pageSize.getHeight() - 25) {
+        doc.addPage();
+        return 25;
+      }
+      return currentY;
+    };
+
+    for (let idx = 0; idx < reservations.length; idx++) {
+      const reservation = reservations[idx];
+      
+      // Add page break between reservations (except before the first one)
+      if (!isFirstPage) {
+        doc.addPage();
+        yPosition = 25;
+      }
+      isFirstPage = false;
+
+      // Top decorative line
+      doc.setDrawColor(79, 70, 229);
+      doc.setLineWidth(1.5);
+      doc.line(margin, yPosition - 5, pageWidth - margin, yPosition - 5);
+      
+      // Title positioned lower (between the two lines)
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(22);
+      doc.setTextColor(79, 70, 229);
+      doc.text('TRAVEL RESERVATION DETAILS', pageWidth / 2, yPosition + 8, { align: 'center' });
+      yPosition += 20;
+      
+      doc.setFontSize(11);
+      doc.setTextColor(100, 100, 100);
+      doc.text(`Booking Reference: ${reservation.bookingReference}`, pageWidth / 2, yPosition, { align: 'center' });
+      yPosition += 12;
+      
+      // Add filter info on first page only
+      if (idx === 0 && filterType && filterDate) {
+        doc.setFontSize(10);
+        doc.setTextColor(79, 70, 229);
+        const filterText = filterType === 'departure' 
+          ? `Filtré par : Départ le ${formatDate(filterDate)}`
+          : `Filtré par : Arrivée le ${formatDate(filterDate)}`;
+        doc.text(filterText, pageWidth / 2, yPosition, { align: 'center' });
+        yPosition += 8;
+      }
+      
+      // Bottom decorative line
+      doc.line(margin, yPosition - 3, pageWidth - margin, yPosition - 3);
+      yPosition += 8;
+
+      // Booking Information Section
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(14);
+      doc.setTextColor(79, 70, 229);
+      doc.text('BOOKING INFORMATION', margin, yPosition);
+      yPosition += 8;
+      
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(10);
+      doc.setTextColor(60, 60, 60);
+      
+      const bookingInfo = [
+        { label: 'Booking Reference', value: reservation.bookingReference },
+        { label: 'Booking Date', value: formatDate(reservation.bookingDate) },
+        { label: 'Hotel', value: reservation.hotelName || 'N/A' },
+        { label: 'Agency', value: `${reservation.agency || 'N/A'} (${reservation.agencyCode || 'N/A'})` },
+      ];
+      
+      for (const info of bookingInfo) {
+        yPosition = checkNewPage(yPosition);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(80, 80, 80);
+        doc.text(info.label + ':', margin, yPosition);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(60, 60, 60);
+        doc.text(info.value, margin + 45, yPosition);
+        yPosition += lineHeight;
+      }
+      yPosition += 5;
+
+      // Passengers Section
+      yPosition = checkNewPage(yPosition, 40 + (reservation.passengers.length * 20));
+      
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(14);
+      doc.setTextColor(79, 70, 229);
+      doc.text(`PASSENGERS (${reservation.passengers.length})`, margin, yPosition);
+      yPosition += 8;
+      
+      for (let i = 0; i < reservation.passengers.length; i++) {
+        const p = reservation.passengers[i];
+        yPosition = checkNewPage(yPosition, 25);
+        
+        // Light background for passengers
+        if (i % 2 === 0) {
+          doc.setFillColor(245, 245, 250);
+          doc.rect(margin, yPosition - 4, pageWidth - (margin * 2), 20, 'F');
+        }
+        
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(11);
+        doc.setTextColor(79, 70, 229);
+        doc.text(`${p.civility} ${p.firstName} ${p.lastName}`, margin + 3, yPosition);
+        yPosition += 6;
+        
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9);
+        doc.setTextColor(80, 80, 80);
+        if (p.age) {
+          doc.text(`Age: ${p.age}`, margin + 8, yPosition);
+          yPosition += 5;
+        }
+        if (p.dateOfBirth) {
+          doc.text(`Born: ${formatDate(p.dateOfBirth)}`, margin + 8, yPosition);
+          yPosition += 5;
+        }
+        yPosition += 6;
+      }
+      yPosition += 3;
+
+      // Outbound Flight Section
+      yPosition = checkNewPage(yPosition, 70);
+      
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(14);
+      doc.setTextColor(79, 70, 229);
+      doc.text('OUTBOUND FLIGHT', margin, yPosition);
+      yPosition += 8;
+      
+      // Flight card background
+      doc.setFillColor(250, 250, 255);
+      doc.rect(margin, yPosition - 3, pageWidth - (margin * 2), 55, 'F');
+      doc.setDrawColor(200, 200, 220);
+      doc.rect(margin, yPosition - 3, pageWidth - (margin * 2), 55);
+      
+      const outboundInfo = [
+        { label: 'From:', value: `${reservation.outboundFlight.departureCity || 'N/A'} (${reservation.outboundFlight.departureIATA || 'N/A'})` },
+        { label: 'Departure:', value: `${formatDate(reservation.outboundFlight.departureDate)} at ${formatTime(reservation.outboundFlight.departureTime)}` },
+        { label: 'To:', value: `${reservation.outboundFlight.arrivalCity || 'N/A'} (${reservation.outboundFlight.arrivalIATA || 'N/A'})` },
+        { label: 'Arrival:', value: `${formatDate(reservation.outboundFlight.arrivalDate)} at ${formatTime(reservation.outboundFlight.arrivalTime)}` },
+        { label: 'Flight Number:', value: reservation.outboundFlight.flightNumber || 'N/A' },
+        { label: 'Airline:', value: reservation.outboundFlight.airline || 'N/A' },
+      ];
+      
+      let outboundY = yPosition;
+      for (const info of outboundInfo) {
+        // Label and value on the same line
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9);
+        doc.setTextColor(100, 100, 120);
+        doc.text(info.label, margin + 5, outboundY);
+        
+        // Value on the same line, just after the label
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(60, 60, 60);
+        doc.text(info.value, margin + 30, outboundY);
+        
+        outboundY += 8;
+      }
+      yPosition += 58;
+
+      // Return Flight Section
+      yPosition = checkNewPage(yPosition, 70);
+      
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(14);
+      doc.setTextColor(79, 70, 229);
+      doc.text('RETURN FLIGHT', margin, yPosition);
+      yPosition += 8;
+      
+      // Flight card background
+      doc.setFillColor(250, 250, 255);
+      doc.rect(margin, yPosition - 3, pageWidth - (margin * 2), 55, 'F');
+      doc.setDrawColor(200, 200, 220);
+      doc.rect(margin, yPosition - 3, pageWidth - (margin * 2), 55);
+      
+      const returnInfo = [
+        { label: 'From:', value: `${reservation.returnFlight.departureCity || 'N/A'} (${reservation.returnFlight.departureIATA || 'N/A'})` },
+        { label: 'Departure:', value: `${formatDate(reservation.returnFlight.departureDate)} at ${formatTime(reservation.returnFlight.departureTime)}` },
+        { label: 'To:', value: `${reservation.returnFlight.arrivalCity || 'N/A'} (${reservation.returnFlight.arrivalIATA || 'N/A'})` },
+        { label: 'Arrival:', value: `${formatDate(reservation.returnFlight.arrivalDate)} at ${formatTime(reservation.returnFlight.arrivalTime)}` },
+        { label: 'Flight Number:', value: reservation.returnFlight.flightNumber || 'N/A' },
+        { label: 'Airline:', value: reservation.returnFlight.airline || 'N/A' },
+      ];
+      
+      let returnY = yPosition;
+      for (const info of returnInfo) {
+        // Label and value on the same line
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9);
+        doc.setTextColor(100, 100, 120);
+        doc.text(info.label, margin + 5, returnY);
+        
+        // Value on the same line, just after the label
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(60, 60, 60);
+        doc.text(info.value, margin + 30, returnY);
+        
+        returnY += 8;
+      }
+      yPosition += 65;
+    }
+
+    // Footer on all pages
+    const pageCount = doc.internal.pages.length;
+    for (let i = 1; i <= pageCount; i++) {
+      doc.setPage(i);
+      doc.setFont('helvetica', 'italic');
+      doc.setFontSize(8);
+      doc.setTextColor(150, 150, 150);
+      doc.text(`Generated on ${new Date().toLocaleString()}`, pageWidth / 2, doc.internal.pageSize.getHeight() - 8, { align: 'center' });
+      doc.text('Travel Reservation Manager', pageWidth / 2, doc.internal.pageSize.getHeight() - 4, { align: 'center' });
+    }
+
+    // Save PDF with dynamic filename
+    const filename = generateFilename(reservations, filterType, filterDate);
+    doc.save(filename);
+    
+  } catch (error) {
+    console.error('PDF export error:', error);
+    throw error;
   }
 }

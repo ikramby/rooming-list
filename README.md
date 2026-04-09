@@ -1,4 +1,4 @@
-# Travel Reservation Manager
+# Vacancia Travel Reservation Manager
 
 A modern web application for importing, managing, and exporting travel reservations from Excel files to PDF format.
 

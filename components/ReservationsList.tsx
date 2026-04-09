@@ -3,17 +3,58 @@
 import { Reservation } from '@/lib/types';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { FileText, Download } from 'lucide-react';
+import { FileText, Download, Loader2 } from 'lucide-react';
 import { ReservationCard } from './ReservationCard';
 import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription } from '@/components/ui/empty';
+import { useState } from 'react';
+import { exportMultipleReservationsToPDF } from '@/lib/pdfExporter';
+import { useToast } from '@/hooks/use-toast';
 
 interface ReservationsListProps {
   reservations: Reservation[];
   onExportPDF: (reservation: Reservation) => void;
   isLoading?: boolean;
+  filterType?: 'departure' | 'arrival' | null; // Add filter type prop
+  filterDate?: string | null; // Add filter date prop
 }
 
-export function ReservationsList({ reservations, onExportPDF, isLoading }: ReservationsListProps) {
+export function ReservationsList({ 
+  reservations, 
+  onExportPDF, 
+  isLoading, 
+  filterType, 
+  filterDate 
+}: ReservationsListProps) {
+  const [isExportingAll, setIsExportingAll] = useState(false);
+  const { toast } = useToast();
+
+  const handleExportAll = async () => {
+    if (reservations.length === 0) return;
+    
+    setIsExportingAll(true);
+    toast({
+      title: 'Export Started',
+      description: `Exporting ${reservations.length} reservation(s)...`,
+    });
+    
+    try {
+      await exportMultipleReservationsToPDF(reservations, filterType || undefined, filterDate || undefined);
+      toast({
+        title: 'Export Complete',
+        description: `Successfully exported ${reservations.length} reservation(s)`,
+      });
+    } catch (error) {
+      console.error('Export all error:', error);
+      toast({
+        title: 'Export Failed',
+        description: 'Failed to export some reservations. Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsExportingAll(false);
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -47,13 +88,16 @@ export function ReservationsList({ reservations, onExportPDF, isLoading }: Reser
           <Button
             size="sm"
             variant="outline"
-            onClick={() => {
-              reservations.forEach((res) => onExportPDF(res));
-            }}
+            onClick={handleExportAll}
+            disabled={isExportingAll}
             className="gap-2"
           >
-            <Download className="h-4 w-4" />
-            Export All
+            {isExportingAll ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Download className="h-4 w-4" />
+            )}
+            {isExportingAll ? 'Exporting...' : 'Exporter Tous en PDF'}
           </Button>
         )}
       </div>

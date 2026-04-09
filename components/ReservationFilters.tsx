@@ -1,10 +1,12 @@
 'use client';
 
 import { FilterOptions } from '@/lib/types';
-import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
-import { Card } from '@/components/ui/card';
-import { X } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { useState, useEffect } from 'react';
 
 interface ReservationFiltersProps {
   filters: FilterOptions;
@@ -12,113 +14,173 @@ interface ReservationFiltersProps {
 }
 
 export function ReservationFilters({ filters, onFiltersChange }: ReservationFiltersProps) {
-  const handleTypeChange = (newType: FilterOptions['type']) => {
-    onFiltersChange({ ...filters, type: newType });
+  const [localFilters, setLocalFilters] = useState<FilterOptions>(filters);
+  const [dateError, setDateError] = useState<string>('');
+
+  // Sync local filters with props when they change externally
+  useEffect(() => {
+    setLocalFilters(filters);
+  }, [filters]);
+
+  const handleTypeChange = (value: 'all' | 'departure' | 'arrival') => {
+    const newFilters = { ...localFilters, type: value };
+    // Clear dates when changing type
+    if (value === 'departure') {
+      newFilters.outDate = undefined;
+      newFilters.inDate = undefined;
+    } else if (value === 'arrival') {
+      newFilters.inDate = undefined;
+      newFilters.outDate = undefined;
+    }
+    setLocalFilters(newFilters);
+    setDateError('');
   };
 
-  const handleStartDateChange = (date: string) => {
-    onFiltersChange({ ...filters, startDate: date });
+  const handleDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const dateValue = e.target.value;
+    
+    if (localFilters.type === 'departure') {
+      // For Departure: use outDate
+      setLocalFilters({ ...localFilters, outDate: dateValue });
+    } else if (localFilters.type === 'arrival') {
+      // For Arrival: use inDate
+      setLocalFilters({ ...localFilters, inDate: dateValue });
+    }
+    setDateError('');
   };
 
-  const handleEndDateChange = (date: string) => {
-    onFiltersChange({ ...filters, endDate: date });
+  const handleValidate = () => {
+    // No validation needed - single date is optional
+    onFiltersChange(localFilters);
   };
 
-  const handleSearchChange = (term: string) => {
-    onFiltersChange({ ...filters, searchTerm: term });
-  };
-
-  const clearFilters = () => {
-    onFiltersChange({
+  const handleReset = () => {
+    const resetFilters: FilterOptions = {
       type: 'all',
-      startDate: undefined,
-      endDate: undefined,
+      inDate: undefined,
+      outDate: undefined,
       searchTerm: undefined,
-    });
+    };
+    setLocalFilters(resetFilters);
+    setDateError('');
+    onFiltersChange(resetFilters);
   };
 
-  const hasActiveFilters =
-    filters.type !== 'all' || filters.startDate || filters.endDate || filters.searchTerm;
+  // Get current date value based on type
+  const getCurrentDateValue = () => {
+    if (localFilters.type === 'departure') {
+      return localFilters.outDate || '';
+    } else if (localFilters.type === 'arrival') {
+      return localFilters.inDate || '';
+    }
+    return '';
+  };
 
+  // Get date label based on type
+  const getDateLabel = () => {
+    if (localFilters.type === 'departure') {
+      return 'Departure Date';
+    } else if (localFilters.type === 'arrival') {
+      return 'Arrival Date';
+    }
+    return '';
+  };
+
+  // Get helper text based on type
+const getHelperText = () => {
+  if (localFilters.type === 'departure') {
+    return 'Filter outbound flights by their departure date from origin';
+  } else if (localFilters.type === 'arrival') {
+    return 'Filter outbound flights by their arrival date at destination';
+  }
+  return '';
+};
+
+const getFilterInfo = () => {
+  if (localFilters.type === 'departure' && localFilters.outDate) {
+    return `Showing outbound flights departing on ${localFilters.outDate}`;
+  } else if (localFilters.type === 'arrival' && localFilters.inDate) {
+    return `Showing outbound flights arriving at destination on ${localFilters.inDate}`;
+  }
+  return '';
+};
   return (
-    <Card className="p-6 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-slate-900 dark:to-slate-800">
-      <div className="space-y-4">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold">Filters</h3>
-          {hasActiveFilters && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={clearFilters}
-              className="text-xs"
-            >
-              <X className="h-4 w-4 mr-1" />
-              Clear All
-            </Button>
-          )}
+    <Card>
+      <CardHeader>
+        <CardTitle>Étape 2: Filtrer & Exporter</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        {/* Trip Type Selection */}
+        <div className="space-y-3">
+          <Label>Type</Label>
+          <RadioGroup
+            value={localFilters.type}
+            onValueChange={handleTypeChange}
+            className="space-y-2"
+          >
+            <div className="flex items-center space-x-2">
+              <RadioGroupItem value="all" id="all" />
+              <Label htmlFor="all" className="cursor-pointer">Toutes les réservations</Label>
+            </div>
+             <div className="flex items-center space-x-2">
+              <RadioGroupItem value="arrival" id="arrival" />
+              <Label htmlFor="arrival" className="cursor-pointer">Arrivée</Label>
+            </div>
+            <div className="flex items-center space-x-2">
+              <RadioGroupItem value="departure" id="departure" />
+              <Label htmlFor="departure" className="cursor-pointer">Départ</Label>
+            </div>
+           
+          </RadioGroup>
         </div>
 
-        {/* Type Filter */}
-        <div className="space-y-2">
-          <label className="text-sm font-medium">Trip Type</label>
-          <div className="flex gap-2">
-            {(['all', 'departure', 'arrival'] as const).map((type) => (
-              <Button
-                key={type}
-                variant={filters.type === type ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => handleTypeChange(type)}
-                className="flex-1"
-              >
-                {type === 'all' ? 'All' : type === 'departure' ? 'Departure' : 'Arrival'}
-              </Button>
-            ))}
-          </div>
-        </div>
-
-        {/* Date Range Filter */}
-        <div className="grid grid-cols-2 gap-3">
+        {/* Single Date Picker - Only show when type is not 'all' */}
+        {localFilters.type !== 'all' && (
           <div className="space-y-2">
-            <label htmlFor="start-date" className="text-sm font-medium">
-              Start Date
-            </label>
+            <Label htmlFor="date">{getDateLabel()}</Label>
             <Input
-              id="start-date"
+              id="date"
               type="date"
-              value={filters.startDate || ''}
-              onChange={(e) => handleStartDateChange(e.target.value)}
-              className="bg-white dark:bg-slate-800"
+              value={getCurrentDateValue()}
+              onChange={handleDateChange}
+              placeholder="Select date"
             />
+            <p className="text-xs text-gray-500">{getHelperText()}</p>
           </div>
-          <div className="space-y-2">
-            <label htmlFor="end-date" className="text-sm font-medium">
-              End Date
-            </label>
-            <Input
-              id="end-date"
-              type="date"
-              value={filters.endDate || ''}
-              onChange={(e) => handleEndDateChange(e.target.value)}
-              className="bg-white dark:bg-slate-800"
-            />
-          </div>
-        </div>
+        )}
 
-        {/* Search Filter */}
-        <div className="space-y-2">
-          <label htmlFor="search" className="text-sm font-medium">
-            Search (Name, Booking Ref, Hotel)
-          </label>
-          <Input
-            id="search"
-            type="text"
-            placeholder="Search reservations..."
-            value={filters.searchTerm || ''}
-            onChange={(e) => handleSearchChange(e.target.value)}
-            className="bg-white dark:bg-slate-800"
-          />
+        {/* Filter Info Message */}
+        {localFilters.type !== 'all' && getFilterInfo() && (
+          <div className="text-xs text-blue-600 bg-blue-50 p-2 rounded">
+            {getFilterInfo()}
+          </div>
+        )}
+
+        {/* Error Message */}
+        {dateError && (
+          <div className="text-sm text-red-600 bg-red-50 p-2 rounded">
+            {dateError}
+          </div>
+        )}
+
+        {/* Action Buttons */}
+        <div className="space-y-2 pt-4">
+          <Button 
+            onClick={handleValidate} 
+            className="w-full"
+            variant="default"
+          >
+            Valider
+          </Button>
+          <Button 
+            onClick={handleReset} 
+            variant="outline" 
+            className="w-full"
+          >
+            Réinitialiser
+          </Button>
         </div>
-      </div>
+      </CardContent>
     </Card>
   );
 }

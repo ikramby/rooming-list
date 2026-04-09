@@ -105,10 +105,9 @@ export function ExcelImporter({ onDataLoaded }: ExcelImporterProps) {
       >
         <div className="flex flex-col items-center justify-center py-12 px-4">
           <Upload className="h-12 w-12 text-gray-400 mb-4" />
-          <h3 className="text-lg font-semibold mb-2">Import Excel File</h3>
+          <h3 className="text-lg font-semibold mb-2">Importer Fichier Excel</h3>
           <p className="text-sm text-gray-600 dark:text-gray-400 mb-6 text-center">
-            Drag and drop your Excel file here or click to browse
-          </p>
+Glissez-déposez votre fichier Excel ici ou cliquez pour parcourir          </p>
 
           <input
             ref={fileInputRef}

@@ -61,7 +61,7 @@ export default function Home() {
           <div className="flex items-center gap-3 mb-2">
             <Plane className="h-8 w-8 text-blue-600 dark:text-blue-400" />
             <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
-              Travel Reservation Manager
+              Vacancia Travel Reservation Manager
             </h1>
           </div>
           <p className="text-gray-600 dark:text-gray-400">
@@ -75,14 +75,14 @@ export default function Home() {
         <div className="space-y-8">
           {/* Import Section */}
           <section>
-            <h2 className="text-2xl font-bold mb-4">Step 1: Import Excel File</h2>
+            <h2 className="text-2xl font-bold mb-4">Étape 1: Importer Fichier Excel</h2>
             <ExcelImporter onDataLoaded={handleDataLoaded} />
           </section>
 
           {/* Filters and Results */}
           {reservations.length > 0 && (
             <section>
-              <h2 className="text-2xl font-bold mb-4">Step 2: Filter & Export</h2>
+              <h2 className="text-2xl font-bold mb-4">Étape 2: Filtrer et exporter en PDF</h2>
 
               <div className="grid lg:grid-cols-4 gap-6">
                 {/* Filters */}
@@ -97,7 +97,7 @@ export default function Home() {
                 <div className="lg:col-span-3">
                   <Tabs defaultValue="list" className="w-full">
                     <div className="flex items-center justify-between mb-4">
-                      <h2 className="text-2xl font-bold">Results ({filteredReservations.length})</h2>
+                      <h2 className="text-2xl font-bold">Résultats ({filteredReservations.length})</h2>
                       <TabsList>
                         <TabsTrigger value="list" className="gap-2">
                           <LayoutGrid className="h-4 w-4" />

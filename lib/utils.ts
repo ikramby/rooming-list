@@ -42,3 +42,19 @@ export function formatDate(dateString: string | undefined): string {
     return dateString
   }
 }
+// Add to your utils file
+
+export function isValidDateRange(startDate?: string, endDate?: string): boolean {
+  if (!startDate && !endDate) return true;
+  if (startDate && !endDate) return true;
+  if (!startDate && endDate) return true;
+  
+  const start = new Date(startDate!);
+  const end = new Date(endDate!);
+  
+  return start <= end;
+}
+
+export function formatDateForInput(date: Date): string {
+  return date.toISOString().split('T')[0];
+}
