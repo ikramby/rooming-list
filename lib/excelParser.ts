@@ -1,412 +1,449 @@
-import { Reservation, Passenger, Flight, Transfer, Accommodation, FilterOptions } from './types';
+/**
+ * excelParser.ts
+ *
+ * Supports two rooming-list XLS layouts that differ in flight column positions.
+ * Format is auto-detected from the VILLE DEPART header row found in each block.
+ *
+ * FORMAT A (e.g. rooming.xls)
+ *   0=VILLE DEPART, 1=IATA DEPART, 5=DATE DEPART, 6=HEURE DEPART,
+ *   7=VILLE ARRIVÉE, 10=IATA ARRIVÉE, 11=DATE ARRIVÉE, 14=HEURE ARRIVÉE,
+ *   17=VOL, 19=DATE EMI, 24=INTITULÉ, 22=bagages
+ *   Passenger: dateOfBirth=col 24  |  Booking: agencyLabel=24, agencyShort=26
+ *
+ * FORMAT B (e.g. rooming11avril.xls)
+ *   0=VILLE DEPART, 2=IATA DEPART, 5=DATE DEPART, 7=HEURE DEPART,
+ *   10=VILLE ARRIVÉE, 11=IATA ARRIVÉE, 15=DATE ARRIVÉE, 18=HEURE ARRIVÉE,
+ *   20=VOL, 21=DATE EMI, 25=INTITULÉ, 27=bagages
+ *   Passenger: dateOfBirth=col 25  |  Booking: agencyLabel=25, agencyShort=28
+ *
+ * Detection key: if col[1] of the VILLE DEPART header row === "IATA DEPART" → Format A,
+ *                if col[2] === "IATA DEPART" → Format B.
+ */
+
+import {
+  Reservation,
+  Passenger,
+  Flight,
+  Transfer,
+  Accommodation,
+  FilterOptions,
+} from './types';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Column-map types
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface FlightCols {
+  departureIATA: number;
+  departureDate: number;
+  departureTime: number;
+  arrivalCity: number;
+  arrivalIATA: number;
+  arrivalDate: number;
+  arrivalTime: number;
+  flightNumber: number;
+  flightDate: number;
+  description: number;
+  baggage: number;
+}
+
+interface BookingCols {
+  bookingDate: number;
+  hotelName: number;
+  agencyLabel: number;
+  agencyShort: number;
+}
+
+interface PaxCols {
+  lastName: number;
+  firstName: number;
+  age: number;
+  dateOfBirth: number;
+}
+
+interface FormatMap {
+  flight: FlightCols;
+  booking: BookingCols;
+  pax: PaxCols;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Format definitions (verified against real files)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const FORMAT_A: FormatMap = {
+  flight: {
+    departureIATA: 1,
+    departureDate: 5,
+    departureTime: 6,
+    arrivalCity: 7,
+    arrivalIATA: 10,
+    arrivalDate: 11,
+    arrivalTime: 14,
+    flightNumber: 17,
+    flightDate: 19,
+    description: 24,
+    baggage: 22,
+  },
+  booking: { bookingDate: 8, hotelName: 19, agencyLabel: 24, agencyShort: 26 },
+  pax: { lastName: 8, firstName: 19, age: 23, dateOfBirth: 24 },
+};
+
+const FORMAT_B: FormatMap = {
+  flight: {
+    departureIATA: 2,
+    departureDate: 5,
+    departureTime: 7,
+    arrivalCity: 10,
+    arrivalIATA: 11,
+    arrivalDate: 15,
+    arrivalTime: 18,
+    flightNumber: 20,
+    flightDate: 21,
+    description: 25,
+    baggage: 27,
+  },
+  booking: { bookingDate: 8, hotelName: 19, agencyLabel: 25, agencyShort: 28 },
+  pax: { lastName: 8, firstName: 19, age: 23, dateOfBirth: 25 },
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Utilities
+// ─────────────────────────────────────────────────────────────────────────────
+
+function cell(row: string[], index: number): string {
+  return String(row[index] ?? '').trim();
+}
+
+function tryParseInt(s: string): number | undefined {
+  const n = parseInt(s, 10);
+  return isNaN(n) ? undefined : n;
+}
+
+/**
+ * Parse any date variant → midnight local Date.
+ * Handles: DD/MM/YYYY, YYYY-MM-DD, "2026-03-17 00:00:00" (pandas datetime).
+ * Returns new Date(0) on failure.
+ */
+export function parseDate(s: string | undefined | null): Date {
+  if (!s || s === 'undefined' || s === 'null') return new Date(0);
+  const c = s.trim();
+  if (!c) return new Date(0);
+
+  // DD/MM/YYYY
+  const slash = c.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (slash) return new Date(Number(slash[3]), Number(slash[2]) - 1, Number(slash[1]));
+
+  // YYYY-MM-DD (also handles pandas "2026-03-17 00:00:00")
+  const iso = c.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]));
+
+  const fallback = new Date(c);
+  return isNaN(fallback.getTime()) ? new Date(0) : fallback;
+}
+
+/** Convert any date string → canonical DD/MM/YYYY, or '' if unparseable */
+function normalizeDate(raw: string): string {
+  if (!raw) return '';
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(raw)) return raw; // already correct
+  const d = parseDate(raw);
+  if (d.getTime() === 0) return '';
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  return `${dd}/${mm}/${d.getFullYear()}`;
+}
+
+function sameDay(a: Date, b: Date): boolean {
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+  );
+}
+
+function extractAirline(description: string): string {
+  if (!description) return 'Unknown';
+  const m = description.match(
+    /\b(Tunisair|TUNISAIR|Transavia|TRANSAVIA|EASY JET|EasyJet|EASYJET|Air France|AIR FRANCE|Swiss|SWISS|Lufthansa|LUFTHANSA|British Airways|KLM|Ryanair|RYANAIR)\b/i,
+  );
+  return m ? m[1] : description.split(' ')[0] || 'Unknown';
+}
+
+/**
+ * Detect format from a VILLE DEPART header row.
+ * Key: if cell[1] === "IATA DEPART" → Format A; otherwise Format B.
+ */
+function detectFormatFromFlightHeader(row: string[]): FormatMap {
+  return String(row[1] ?? '').trim().toUpperCase() === 'IATA DEPART' ? FORMAT_A : FORMAT_B;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Public entry point
+// ─────────────────────────────────────────────────────────────────────────────
 
 export function parseExcelFile(data: string[][]): Reservation[] {
+  const rows = data.filter((row) =>
+    row?.some((c) => c !== null && c !== undefined && String(c).trim() !== ''),
+  );
+
   const reservations: Reservation[] = [];
-  
-  // Remove completely empty rows
-  const cleanedRows = data.filter((row) => {
-    return row && row.length > 0 && row.some((cell) => cell !== null && cell !== undefined && String(cell).trim() !== '');
-  });
-
-  console.log('[v0] Parser received cleaned rows:', cleanedRows.length);
-
   let i = 0;
-  while (i < cleanedRows.length) {
-    const row = cleanedRows[i];
-    const firstCol = String(row[0] || '').trim();
 
-    // Check if this is a booking reference row (D-001, D-002, etc.)
-    if (firstCol.match(/^D-\d+/)) {
-      console.log('[v0] Found booking reference at row', i, ':', firstCol);
-      const { reservation, nextIndex } = parseReservationBlock(cleanedRows, i);
-      if (reservation && reservation.passengers.length > 0) {
-        reservations.push(reservation);
-      }
+  while (i < rows.length) {
+    if (String(rows[i][0] ?? '').trim().match(/^D-\d+/)) {
+      const { reservation, nextIndex } = parseBlock(rows, i);
+      if (reservation) reservations.push(reservation);
       i = nextIndex;
     } else {
       i++;
     }
   }
 
-  console.log('[v0] Parser completed with', reservations.length, 'reservations');
+  console.log(`[excelParser] Parsed ${reservations.length} reservations`);
   return reservations;
 }
 
-function parseReservationBlock(rows: string[][], startIndex: number): { reservation: Reservation | null; nextIndex: number } {
+// ─────────────────────────────────────────────────────────────────────────────
+// Block parser
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Internal type: passenger row buffered before format is known
+type RawPassengerRow = {
+  civility: string;
+  row: string[];
+};
+
+function parseBlock(
+  rows: string[][],
+  startIndex: number,
+): { reservation: Reservation | null; nextIndex: number } {
   const headerRow = rows[startIndex];
-  const bookingReference = String(headerRow[0] || '').trim();
+  const bookingReference = cell(headerRow, 0);
 
-  // Find booking date, hotel name, and agency from the header row
-  // Based on observation:
-  // Col 8 (index 8): Date
-  // Col 19 (index 19): Hotel
-  // Col 24 (index 24): Agency Info
-  // Col 26 (index 26): Agency Name
+  let fmt: FormatMap | null = null; // resolved when we hit VILLE DEPART
+  let hotelName = '';
+  let agencyLabel = '';
+  let agencyShort = '';
+  let bookingDate = '';
 
-  const bookingDate = String(headerRow[8] || '').trim() || new Date().toISOString().split('T')[0];
-  const hotelName = String(headerRow[19] || '').trim();
-  const agency = String(headerRow[26] || '').trim();
-  const agencyCode = String(headerRow[24] || '').trim();
+  // We buffer raw passenger rows because they appear BEFORE the VILLE DEPART
+  // header (which tells us which format to use for dateOfBirth column).
+  const rawPaxRows: RawPassengerRow[] = [];
 
   const passengers: Passenger[] = [];
   const flights: Flight[] = [];
   const transfers: Transfer[] = [];
   const accommodations: Accommodation[] = [];
 
+  type Section = 'none' | 'passengers' | 'flights' | 'services';
+  let section: Section = 'none';
+
   let i = startIndex + 1;
-  let state: 'header' | 'passengers' | 'flights' | 'transfers' | 'accommodations' = 'header';
 
   while (i < rows.length) {
     const row = rows[i];
-    const firstCol = String(row[0] || '').trim();
-    const firstColUpper = firstCol.toUpperCase();
+    const col0 = cell(row, 0);
+    const col0up = col0.toUpperCase();
 
-    // Stop at next reservation
-    if (firstCol.match(/^D-\d+/) && i !== startIndex) {
-      break;
-    }
+    // Next booking block → stop
+    if (col0.match(/^D-\d+/)) break;
 
-    // State machine: identify sections
-    if (firstColUpper === 'CIV') {
-      state = 'passengers';
+    // ── Section markers ────────────────────────────────────────────────────
+
+    if (col0up === 'CIV') {
+      section = 'passengers';
       i++;
       continue;
     }
 
-    if (firstColUpper === 'VILLE DEPART') {
-      state = 'flights';
-      i++;
-      continue;
-    }
+    if (col0up === 'VILLE DEPART') {
+      fmt = detectFormatFromFlightHeader(row);
 
-    if (firstColUpper.includes('TRANSFERT')) {
-      state = 'transfers';
-      i++;
-      continue;
-    } else if (firstColUpper.includes('HOTEL') || firstColUpper.includes('RESORT') || firstColUpper.includes('CHAMBRE')) {
-      state = 'accommodations';
-      i++;
-      continue;
-    }
+      // Resolve booking header cols now that format is known
+      hotelName = cell(headerRow, fmt.booking.hotelName);
+      agencyLabel = cell(headerRow, fmt.booking.agencyLabel);
+      agencyShort = cell(headerRow, fmt.booking.agencyShort);
+      bookingDate = normalizeDate(cell(headerRow, fmt.booking.bookingDate));
 
-    // Parse based on current state
-    if (state === 'passengers') {
-      const civility = firstColUpper;
-      if (['MADAME', 'MONSIEUR', 'MLLE', 'M.', 'MME', 'MR'].includes(civility)) {
-        // Based on observation: NOM is at index 8, PRENOM at index 19, AGE at index 23, DATE NAISSANCE at index 24
-        const lastName = String(row[8] || '').trim();
-        const firstName = String(row[19] || '').trim();
-
+      // Flush buffered passenger rows with correct dateOfBirth column
+      for (const { civility, row: pr } of rawPaxRows) {
+        const lastName = cell(pr, fmt.pax.lastName);
+        const firstName = cell(pr, fmt.pax.firstName);
         if (lastName || firstName) {
-          const passenger: Passenger = {
-            civility: firstCol,
+          passengers.push({
+            civility,
             lastName,
             firstName,
-            age: row[23] ? tryParseInt(String(row[23])) : undefined,
-            dateOfBirth: String(row[24] || '').trim() || undefined,
-          };
-          passengers.push(passenger);
+            age: tryParseInt(cell(pr, fmt.pax.age)),
+            dateOfBirth: normalizeDate(cell(pr, fmt.pax.dateOfBirth)) || undefined,
+          });
         }
       }
-    } else if (state === 'flights') {
-      // Flights row:
-      // VILLE DEPART (0), IATA DEPART (1), DATE DEPART (5), HEURE DEPART (6),
-      // VILLE ARRIVÉE (7), IATA ARRIVÉE (10), DATE ARRIVÉE (11), HEURE ARRIVÉE (14),
-      // VOL (17), DATE EMI (19), INTITULÉ (24)
-      if (row.length >= 18 && (isAirportCity(firstColUpper) || firstColUpper !== '')) {
-        const flight: Flight = {
-          departureCity: firstColUpper,
-          departureIATA: String(row[1] || '').trim(),
-          departureDate: String(row[5] || '').trim(),
-          departureTime: String(row[6] || '').trim(),
-          arrivalCity: String(row[7] || '').trim(),
-          arrivalIATA: String(row[10] || '').trim(),
-          arrivalDate: String(row[11] || '').trim(),
-          arrivalTime: String(row[14] || '').trim(),
-          flightNumber: String(row[17] || '').trim(),
-          flightDate: String(row[19] || '').trim(),
-          airline: extractAirline(String(row[24] || '')),
-          description: String(row[24] || '').trim(),
-        };
-        if (flight.departureDate && flight.arrivalDate) {
-          flights.push(flight);
+      rawPaxRows.length = 0;
+
+      section = 'flights';
+      i++;
+      continue;
+    }
+
+    // "In / Out" service header row
+    if (!col0 && cell(row, 13).toUpperCase() === 'IN') {
+      section = 'services';
+      i++;
+      continue;
+    }
+
+    // ── Row data ────────────────────────────────────────────────────────────
+
+    if (section === 'passengers') {
+      if (['MADAME', 'MONSIEUR', 'MLLE', 'M.', 'MME', 'MR'].includes(col0up)) {
+        if (!fmt) {
+          // Format not yet known → buffer for later
+          rawPaxRows.push({ civility: col0, row });
+        } else {
+          const lastName = cell(row, fmt.pax.lastName);
+          const firstName = cell(row, fmt.pax.firstName);
+          if (lastName || firstName) {
+            passengers.push({
+              civility: col0,
+              lastName,
+              firstName,
+              age: tryParseInt(cell(row, fmt.pax.age)),
+              dateOfBirth: normalizeDate(cell(row, fmt.pax.dateOfBirth)) || undefined,
+            });
+          }
         }
       }
-    } else if (state === 'transfers') {
-      // Transfer row: Description (0), In (13), Out (16)
-      if (row[13] || row[16]) {
-        const transfer: Transfer = {
-          description: firstCol,
-          checkInDate: String(row[13] || '').trim(),
-          checkOutDate: String(row[16] || '').trim(),
-        };
-        transfers.push(transfer);
+    } else if (section === 'flights' && fmt) {
+      const depDate = normalizeDate(cell(row, fmt.flight.departureDate));
+      const arrDate = normalizeDate(cell(row, fmt.flight.arrivalDate));
+      if (depDate && arrDate) {
+        const desc = cell(row, fmt.flight.description);
+        flights.push({
+          departureCity: col0,
+          departureIATA: cell(row, fmt.flight.departureIATA),
+          departureDate: depDate,
+          departureTime: cell(row, fmt.flight.departureTime),
+          arrivalCity: cell(row, fmt.flight.arrivalCity),
+          arrivalIATA: cell(row, fmt.flight.arrivalIATA),
+          arrivalDate: arrDate,
+          arrivalTime: cell(row, fmt.flight.arrivalTime),
+          flightNumber: cell(row, fmt.flight.flightNumber),
+          flightDate: normalizeDate(cell(row, fmt.flight.flightDate)),
+          airline: extractAirline(desc),
+          description: desc,
+        });
       }
-    } else if (state === 'accommodations') {
-      // Accommodation row: Description (0), In (13), Out (16)
-      if (row[13] || row[16]) {
-        const accommodation: Accommodation = {
-          name: firstCol,
-          roomType: '', // Could be parsed from description if needed
-          checkInDate: String(row[13] || '').trim(),
-          checkOutDate: String(row[16] || '').trim(),
-        };
-        accommodations.push(accommodation);
+    } else if (section === 'services') {
+      const checkIn = normalizeDate(cell(row, 13));
+      const checkOut = normalizeDate(cell(row, 16));
+      if (checkIn || checkOut) {
+        if (col0up.includes('TRANSFERT') || col0up.includes('TRANSFER')) {
+          transfers.push({ description: col0, checkInDate: checkIn, checkOutDate: checkOut });
+        } else {
+          accommodations.push({ name: col0, roomType: '', checkInDate: checkIn, checkOutDate: checkOut });
+        }
       }
     }
 
     i++;
   }
 
-  if (passengers.length > 0) {
-    const reservation: Reservation = {
-      id: `${bookingReference}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      bookingReference,
-      bookingDate,
-      hotelName,
-      agency,
-      agencyCode,
-      passengers,
-      outboundFlight: flights[0] || ({} as Flight),
-      returnFlight: flights[1] || ({} as Flight),
-      transfers,
-      accommodations,
-      baggage: '',
-      importDate: new Date().toISOString(),
-    };
-
-    return { reservation, nextIndex: i };
+  if (passengers.length === 0 && rawPaxRows.length === 0) {
+    return { reservation: null, nextIndex: i };
   }
 
-  return { reservation: null, nextIndex: i };
-}
-
-function isAirportCity(text: string): boolean {
-  const cities = new Set([
-    'GENEVE', 'GENEVA', 'GVA',
-    'PARIS', 'CDG', 'ORY', 'PARIS-ORLY',
-    'LYON', 'LYS', 'LYON-BALE',
-    'MARSEILLE', 'MRS',
-    'TOULOUSE', 'TLS',
-    'NICE', 'NCE',
-    'DJERBA', 'DJE',
-    'MONASTIR', 'MIR',
-    'TUNIS', 'TUN', 'TUNISIA',
-    'BERLIN', 'BER', 'BRU',
-    'LONDON', 'LHR', 'LGW', 'STN',
-    'AMSTERDAM', 'AMS',
-    'ROME', 'FCO', 'CIA', 'ROM',
-    'BARCELONA', 'BCN',
-    'CASABLANCA', 'CMN',
-    'AGADIR', 'AGA',
-    'BORDEAUX', 'BOD',
-    'NANTES', 'NTE',
-    'STRASBOURG', 'SXB',
-    'BALE', 'BSL',
-    'RENNES', 'RNS',
-    'TOULON', 'TLN',
-    'PERPIGNAN', 'PGF'
-  ]);
-  return cities.has(text);
-}
-
-function tryParseInt(str: string): number | undefined {
-  if (!str) return undefined;
-  const num = parseInt(str, 10);
-  return isNaN(num) ? undefined : num;
-}
-
-function extractAirline(text: string): string {
-  if (!text) return 'Unknown';
-  const airlineMatch = text.match(/(?:EasyJet|EASYJET|easy jet|Tunisair|TUNISAIR|Air France|AIR FRANCE|Swiss|SWISS|Lufthansa|LUFTHANSA|British|BRITISH|KLM|Ryanair|RYANAIR)/i);
-  if (airlineMatch) {
-    return airlineMatch[0];
-  }
-  const match = text.match(/^([A-Z]+(?:\s+[A-Z]+)?)/);
-  return match ? match[1] : 'Unknown';
-}
-
-// Main parseFlightDate function with better error handling
-
-function hasValidFlightDate(reservation: Reservation, type: 'departure' | 'arrival'): boolean {
-  if (type === 'departure') {
-    const flight = reservation.outboundFlight;
-    return !!(flight && flight.departureDate && flight.departureDate.trim() !== '');
-  } else {
-    const flight = reservation.returnFlight;
-    return !!(flight && flight.arrivalDate && flight.arrivalDate.trim() !== '');
-  }
-}
-function parseFlightDate(dateString: string | undefined | null): Date {
-  // Handle null/undefined/empty
-  if (!dateString || dateString === 'undefined' || dateString === 'null' || dateString.trim() === '') {
-    console.warn('Empty or invalid date string provided');
-    return new Date(0); // Return epoch for invalid dates
-  }
-  
-  try {
-    // Handle DD/MM/YYYY format (common in French data)
-    if (dateString.includes('/')) {
-      const parts = dateString.split('/');
-      if (parts.length === 3) {
-        const day = parseInt(parts[0]);
-        const month = parseInt(parts[1]) - 1; // Months are 0-indexed
-        const year = parseInt(parts[2]);
-        
-        // Validate numbers
-        if (!isNaN(day) && !isNaN(month) && !isNaN(year)) {
-          const date = new Date(year, month, day);
-          if (!isNaN(date.getTime())) {
-            return date;
-          }
-        }
+  // If fmt was never resolved (block had no VILLE DEPART), use Format A as fallback
+  if (!fmt) {
+    fmt = FORMAT_A;
+    hotelName = cell(headerRow, fmt.booking.hotelName);
+    agencyLabel = cell(headerRow, fmt.booking.agencyLabel);
+    agencyShort = cell(headerRow, fmt.booking.agencyShort);
+    bookingDate = normalizeDate(cell(headerRow, fmt.booking.bookingDate));
+    for (const { civility, row: pr } of rawPaxRows) {
+      const lastName = cell(pr, fmt.pax.lastName);
+      const firstName = cell(pr, fmt.pax.firstName);
+      if (lastName || firstName) {
+        passengers.push({
+          civility,
+          lastName,
+          firstName,
+          age: tryParseInt(cell(pr, fmt.pax.age)),
+          dateOfBirth: normalizeDate(cell(pr, fmt.pax.dateOfBirth)) || undefined,
+        });
       }
     }
-    
-    // Handle YYYY-MM-DD format
-    if (dateString.includes('-')) {
-      const date = new Date(dateString);
-      if (!isNaN(date.getTime())) {
-        return date;
-      }
-    }
-    
-    // Try parsing as standard date
-    const date = new Date(dateString);
-    if (!isNaN(date.getTime())) {
-      return date;
-    }
-    
-    // If all else fails, try to extract date from string using regex
-    const dateMatch = dateString.match(/(\d{2})[\/\-](\d{2})[\/\-](\d{4})/);
-    if (dateMatch) {
-      const day = parseInt(dateMatch[1]);
-      const month = parseInt(dateMatch[2]) - 1;
-      const year = parseInt(dateMatch[3]);
-      const parsedDate = new Date(year, month, day);
-      if (!isNaN(parsedDate.getTime())) {
-        return parsedDate;
-      }
-    }
-    
-    console.warn(`Could not parse date: ${dateString}`);
-    return new Date(0); // Return epoch for invalid dates
-  } catch (error) {
-    console.error(`Error parsing date ${dateString}:`, error);
-    return new Date(0);
   }
-}
-// Filter reservations function
 
+  const reservation: Reservation = {
+    id: `${bookingReference}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+    bookingReference,
+    bookingDate,
+    hotelName,
+    agency: agencyShort || agencyLabel,
+    agencyCode: agencyLabel,
+    passengers,
+    outboundFlight: flights[0] ?? ({} as Flight),
+    returnFlight: flights[1] ?? ({} as Flight),
+    transfers,
+    accommodations,
+    baggage: '',
+    importDate: new Date().toISOString(),
+  };
+
+  return { reservation, nextIndex: i };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Filter
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Stored dates: DD/MM/YYYY.
+ * Filter values (inDate/outDate): YYYY-MM-DD from HTML <input type="date">.
+ * Both normalised via parseDate() before comparison.
+ */
 export function filterReservations(
   reservations: Reservation[],
   type: 'all' | 'departure' | 'arrival',
   inDate?: string,
   outDate?: string,
-  searchTerm?: string
+  searchTerm?: string,
 ): Reservation[] {
-  let filtered = [...reservations];
+  let result = reservations;
 
-  // Apply trip type and date filters
   if (type !== 'all') {
-    filtered = filtered.filter((reservation) => {
-      let flightToCheck;
-      let dateToCheck;
-      
-      if (type === 'departure') {
-        // OUTBOUND TRIP: Use outbound flight's DEPARTURE date
-        flightToCheck = reservation.outboundFlight;
-        dateToCheck = flightToCheck?.departureDate;
-        
-        if (!dateToCheck) {
-          console.warn(`Reservation ${reservation.bookingReference} has no departure date`);
-          return false;
-        }
-      } else {
-        // RETURN TRIP (ARRIVAL): Use outbound flight's ARRIVAL date (when you reach destination)
-        flightToCheck = reservation.outboundFlight;
-        dateToCheck = flightToCheck?.arrivalDate;
-        
-        if (!dateToCheck) {
-          console.warn(`Reservation ${reservation.bookingReference} has no arrival date`);
-          return false;
-        }
-      }
-      
-      // Check if flight exists
-      if (!flightToCheck) {
-        console.warn(`Reservation ${reservation.bookingReference} has no flight`);
-        return false;
-      }
-      
-      // Parse the date
-      const flightDate = parseFlightDate(dateToCheck);
-      
-      // Check if date is valid
-      if (flightDate.getTime() === 0 || isNaN(flightDate.getTime())) {
-        console.warn(`Invalid date for ${reservation.bookingReference}: ${dateToCheck}`);
-        return false;
-      }
-      
-      // Apply date filter
-      if (type === 'departure' && outDate) {
-        // Filter outbound flights by departure date
-        const filterDate = new Date(outDate);
-        if (isNaN(filterDate.getTime())) return true;
-        filterDate.setHours(0, 0, 0, 0);
-        const flightDateStart = new Date(flightDate);
-        flightDateStart.setHours(0, 0, 0, 0);
-        return flightDateStart.getTime() === filterDate.getTime();
-      } else if (type === 'arrival' && inDate) {
-        // Filter outbound flights by arrival date at destination
-        const filterDate = new Date(inDate);
-        if (isNaN(filterDate.getTime())) return true;
-        filterDate.setHours(0, 0, 0, 0);
-        const flightDateStart = new Date(flightDate);
-        flightDateStart.setHours(0, 0, 0, 0);
-        return flightDateStart.getTime() === filterDate.getTime();
-      }
-      
-      return true;
+    const filterDate = parseDate(type === 'departure' ? outDate : inDate);
+    const hasDateFilter = filterDate.getTime() !== 0;
+
+    result = result.filter((r) => {
+      const flight = r.outboundFlight;
+      if (!flight) return false;
+      const rawDate = type === 'departure' ? flight.departureDate : flight.arrivalDate;
+      if (!rawDate) return false;
+      const fd = parseDate(rawDate);
+      if (fd.getTime() === 0) return false;
+      if (!hasDateFilter) return true;
+      return sameDay(fd, filterDate);
     });
   }
 
-  // Apply search filter if provided
-  if (searchTerm && searchTerm.trim() !== '') {
+  if (searchTerm?.trim()) {
     const term = searchTerm.toLowerCase();
-    filtered = filtered.filter(
-      (reservation) =>
-        (reservation.bookingReference?.toLowerCase().includes(term) || false) ||
-        (reservation.hotelName?.toLowerCase().includes(term) || false) ||
-        (reservation.agency?.toLowerCase().includes(term) || false) ||
-        (reservation.passengers?.some(
+    result = result.filter(
+      (r) =>
+        r.bookingReference?.toLowerCase().includes(term) ||
+        r.hotelName?.toLowerCase().includes(term) ||
+        r.agency?.toLowerCase().includes(term) ||
+        r.passengers?.some(
           (p) =>
-            (p.firstName?.toLowerCase().includes(term) || false) ||
-            (p.lastName?.toLowerCase().includes(term) || false)
-        ) || false) ||
-        (reservation.outboundFlight?.flightNumber?.toLowerCase().includes(term) || false) ||
-        (reservation.returnFlight?.flightNumber?.toLowerCase().includes(term) || false)
+            p.firstName?.toLowerCase().includes(term) ||
+            p.lastName?.toLowerCase().includes(term),
+        ) ||
+        r.outboundFlight?.flightNumber?.toLowerCase().includes(term) ||
+        r.returnFlight?.flightNumber?.toLowerCase().includes(term),
     );
   }
 
-  return filtered;
-}
-// Helper function for other date parsing needs
-function parseDate(dateStr: string): Date {
-  if (!dateStr) return new Date('1900-01-01');
-
-  // Handle DD/MM/YYYY format (French format)
-  if (dateStr.includes('/')) {
-    const parts = dateStr.split('/');
-    if (parts.length === 3) {
-      const day = parts[0];
-      const month = parts[1];
-      const year = parts[2];
-      if (day && month && year && !isNaN(parseInt(day)) && !isNaN(parseInt(month)) && !isNaN(parseInt(year))) {
-        return new Date(`${year}-${month}-${day}`);
-      }
-    }
-  }
-
-  return new Date(dateStr);
+  return result;
 }

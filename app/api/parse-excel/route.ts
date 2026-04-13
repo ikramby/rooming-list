@@ -11,33 +11,47 @@ export async function POST(request: NextRequest) {
     }
 
     if (!file.name.endsWith('.xlsx') && !file.name.endsWith('.xls')) {
-      return NextResponse.json({ error: 'Invalid file format. Please upload an Excel file.' }, { status: 400 });
+      return NextResponse.json(
+        { error: 'Invalid file format. Please upload an Excel file (.xlsx or .xls).' },
+        { status: 400 },
+      );
     }
 
-    // Convert file to array buffer
     const buffer = await file.arrayBuffer();
 
-    // Use dynamic import for xlsx to avoid issues in Next.js
     const XLSX = await import('xlsx');
     const workbook = XLSX.read(new Uint8Array(buffer), { type: 'array' });
     const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-    const data = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as string[][];
 
-    // Log the raw data for debugging
-    console.log('[v0] Excel sheet rows:', data.length);
-    if (data.length > 0) {
-      console.log('[v0] First 5 rows:', data.slice(0, 5).map((row, i) => `Row ${i}: ${row.slice(0, 3).join(' | ')}`));
+    // sheet_to_json with header:1 returns raw rows as string[][]
+    // raw:false lets XLSX format dates as strings rather than serial numbers
+    const data = XLSX.utils.sheet_to_json(worksheet, {
+      header: 1,
+      raw: false,        // dates become "DD/MM/YYYY" strings when possible
+      dateNF: 'DD/MM/YYYY',
+    }) as string[][];
+
+    console.log(`[route] Raw Excel rows: ${data.length}, file: ${file.name}`);
+
+    // Parse → normalised Reservation[]  (all dates stored as DD/MM/YYYY)
+    const reservations = parseExcelFile(data);
+
+    console.log(`[route] Parsed ${reservations.length} reservations`);
+
+    if (reservations.length > 0) {
+      // Log the first reservation as JSON so you can inspect the structure
+      console.log('[route] First reservation JSON:\n', JSON.stringify(reservations[0], null, 2));
     }
 
-    // Parse the data using our custom parser
-    const reservations = parseExcelFile(data);
-    console.log('[v0] Parsed reservations:', reservations.length);
-    if (reservations.length > 0) {
-      console.log('[v0] First reservation:', {
-        bookingRef: reservations[0].bookingReference,
-        passengers: reservations[0].passengers.length,
-        flights: reservations[0].outboundFlight?.departureCity,
-      });
+    if (reservations.length === 0) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            'No valid reservations found. Ensure the file contains booking references (D-001, D-002 …) and passenger rows.',
+        },
+        { status: 422 },
+      );
     }
 
     return NextResponse.json(
@@ -52,7 +66,7 @@ export async function POST(request: NextRequest) {
       { status: 200 },
     );
   } catch (error) {
-    console.error('[v0] Excel parsing error:', error);
+    console.error('[route] Excel parsing error:', error);
     return NextResponse.json(
       {
         success: false,
