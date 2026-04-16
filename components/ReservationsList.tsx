@@ -7,15 +7,15 @@ import { FileText, Download, Loader2 } from 'lucide-react';
 import { ReservationCard } from './ReservationCard';
 import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription } from '@/components/ui/empty';
 import { useState } from 'react';
-import { exportMultipleReservationsToPDF } from '@/lib/pdfExporter';
+import { exportMultipleReservationsToXLSX } from '@/lib/xlsxExporter'; // ← changed
 import { useToast } from '@/hooks/use-toast';
 
 interface ReservationsListProps {
   reservations: Reservation[];
   onExportPDF: (reservation: Reservation) => void;
   isLoading?: boolean;
-  filterType?: 'departure' | 'arrival' | null; // Add filter type prop
-  filterDate?: string | null; // Add filter date prop
+  filterType?: 'departure' | 'arrival' | null;
+  filterDate?: string | null;
 }
 
 export function ReservationsList({ 
@@ -30,15 +30,17 @@ export function ReservationsList({
 
   const handleExportAll = async () => {
     if (reservations.length === 0) return;
-    
     setIsExportingAll(true);
     toast({
       title: 'Export Started',
       description: `Exporting ${reservations.length} reservation(s)...`,
     });
-    
     try {
-      await exportMultipleReservationsToPDF(reservations, filterType || undefined, filterDate || undefined);
+      exportMultipleReservationsToXLSX(  // ← changed (sync, no await needed)
+        reservations,
+        filterType || undefined,
+        filterDate || undefined
+      );
       toast({
         title: 'Export Complete',
         description: `Successfully exported ${reservations.length} reservation(s)`,
@@ -47,14 +49,13 @@ export function ReservationsList({
       console.error('Export all error:', error);
       toast({
         title: 'Export Failed',
-        description: 'Failed to export some reservations. Please try again.',
+        description: 'Failed to export reservations. Please try again.',
         variant: 'destructive',
       });
     } finally {
       setIsExportingAll(false);
     }
   };
-
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -97,7 +98,7 @@ export function ReservationsList({
             ) : (
               <Download className="h-4 w-4" />
             )}
-            {isExportingAll ? 'Exporting...' : 'Exporter Tous en PDF'}
+            {isExportingAll ? 'Exporting...' : 'Exporter Tous en Excel'}
           </Button>
         )}
       </div>
